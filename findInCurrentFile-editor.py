@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, scrolledtext
+import tkinter.font as tkfont
 import json5
 
 # === BACKUP CONFIGURATION ===
@@ -90,29 +91,54 @@ class CommandEditor(tk.Toplevel):
         self.regex_var = tk.BooleanVar(value=bool(cfg.get("isRegex")))
         ttk.Checkbutton(self, text="Use Regular Expressions (isRegex)", variable=self.regex_var).pack(anchor="w", padx=20, pady=5)
 
-        # === Paired Find/Replace Table ===
+        # === Paired Find/Replace Table – FINAL WORKING + GRID + AUTO-SIZE ===
         ttk.Label(self, text="Find → Replace Patterns:", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=20, pady=(15,5))
 
         table_frame = ttk.Frame(self)
         table_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
-        # Treeview with two columns
-        columns = ("find", "replace")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
+        style = ttk.Style()
+        style.theme_use('default')  # Required for real grid lines
+
+        style.configure("Treeview",
+                        background="white",
+                        foreground="black",
+                        rowheight=28,
+                        font=("Segoe UI", 10),
+                        borderwidth=1,
+                        relief="solid")
+        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+
+        # This forces visible grid lines
+        style.layout("Treeview", [
+            ('Treeview.treearea', {'sticky': 'nswe', 'border': 1})
+        ])
+
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=("find", "replace"),
+            show="headings",
+            height=15,
+            selectmode="extended"
+        )
+
         self.tree.heading("find", text="Find Pattern")
         self.tree.heading("replace", text="Replace With")
-        self.tree.column("find", width=400, anchor="w")
-        self.tree.column("replace", width=400, anchor="w")
+        self.tree.column("find", anchor="w", minwidth=200, stretch=True)
+        self.tree.column("replace", anchor="w", minwidth=100, stretch=True)
 
+        # Zebra striping
+        self.tree.tag_configure("even", background="white")
+        self.tree.tag_configure("odd",  background="#f5f8ff")
+
+        # Scrollbar
         vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
-
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
-        # Load existing pairs
         self.load_pairs()
 
         # Buttons below table
@@ -134,13 +160,34 @@ class CommandEditor(tk.Toplevel):
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
 
     def load_pairs(self):
+        self.tree.delete(*self.tree.get_children())
         finds = self.cfg.get("find", [])
         replaces = self.cfg.get("replace", [])
-        max_len = max(len(finds), len(replaces))
-        for i in range(max_len):
+
+        for i in range(max(len(finds), len(replaces))):
             f = finds[i] if i < len(finds) else ""
             r = replaces[i] if i < len(replaces) else ""
-            self.tree.insert("", "end", values=(f, r))
+            tag = "even" if i % 2 == 0 else "odd"
+            self.tree.insert("", "end", values=(f, r), tags=(tag,))
+
+        self.after(100, self.auto_fit_columns)
+
+    def auto_fit_columns(self):
+        font_normal = tkfont.Font(family="Segoe UI", size=10)
+        font_bold   = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+
+        for col_idx, col in enumerate(("find", "replace")):
+            # Measure header
+            header_text = self.tree.heading(col, "text")
+            width = font_bold.measure(header_text) + 20
+
+            # Measure all cells in this column
+            for item in self.tree.get_children():
+                cell_text = self.tree.item(item, "values")[col_idx]
+                if cell_text:
+                    width = max(width, font_normal.measure(cell_text) + 30)
+
+            self.tree.column(col, width=width)
 
     def get_pairs(self):
         pairs = []
