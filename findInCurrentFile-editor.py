@@ -1,16 +1,15 @@
-# findInCurrentFile-editor.py  ←  INTERACTIVE EDITOR VERSION
+# findInCurrentFile-editor.py  ←  NOW WITH AUTOMATIC BACKUPS
 import os
+import shutil
 from pathlib import Path
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, scrolledtext
 import json5
 
-try:
-    import json5
-except ImportError:
-    messagebox.showerror("Missing json5", "Run once:\n    pip install json5")
-    raise
-
+# === BACKUP CONFIGURATION ===
+MAX_BACKUPS = 20
+BACKUP_DIR_NAME = "settings-backups"
 EXTENSION_ID = "findInCurrentFile"
 
 def get_vscode_settings_path() -> Path | None:
@@ -31,8 +30,31 @@ def load_settings(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json5.load(f)
 
+def ensure_backup_dir(settings_path: Path):
+    backup_dir = settings_path.parent / BACKUP_DIR_NAME
+    backup_dir.mkdir(exist_ok=True)
+    return backup_dir
+
+def create_backup(settings_path: Path):
+    if not settings_path.exists():
+        return
+    backup_dir = ensure_backup_dir(settings_path)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    backup_path = backup_dir / f"settings.json.backup-{timestamp}.json"
+    shutil.copy2(settings_path, backup_path)  # copy2 preserves metadata
+
+    # Keep only the newest MAX_BACKUPS
+    backups = sorted(backup_dir.glob("settings.json.backup-*.json"), 
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in backups[MAX_BACKUPS:]:
+        try:
+            old.unlink()
+        except:
+            pass
+
 def save_settings(path: Path, data: dict):
-    # Write with proper formatting and preserve comments via json5
+    """Save with automatic backup first"""
+    create_backup(path)  # ← This is the only line you needed to add!
     with open(path, "w", encoding="utf-8") as f:
         json5.dump(data, f, indent=4, quote_keys=True, trailing_commas=False)
 
@@ -127,6 +149,7 @@ class MainApp:
         ttk.Button(top_bar, text="Add New Command", command=self.add_new_command).pack(side="left")
         ttk.Button(top_bar, text="Refresh", command=self.reload).pack(side="left", padx=(10,0))
         ttk.Button(top_bar, text="Close", command=root.destroy).pack(side="right")
+        ttk.Button(top_bar, text="Restore Last Backup", command=self.restore_last_backup).pack(side="left", padx=(10,0))
 
         # Scrollable canvas for command cards
         canvas = tk.Canvas(root)
@@ -148,6 +171,21 @@ class MainApp:
         self.frames = {}  # cmd_name -> frame
 
         self.reload()
+
+    def restore_last_backup(self):
+        backup_dir = self.settings_path.parent / BACKUP_DIR_NAME
+        if not backup_dir.exists():
+            messagebox.showinfo("No backups", "No backup folder found.")
+            return
+        backups = sorted(backup_dir.glob("settings.json.backup-*.json"), 
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+        if not backups:
+            messagebox.showinfo("No backups", "No backup files found.")
+            return
+        if messagebox.askyesno("Restore", f"Restore from:\n{backups[0].name} ?"):
+            shutil.copy2(backups[0], self.settings_path)
+            messagebox.showinfo("Restored", "Settings restored! Restarting view...")
+            self.reload()
 
     def reload(self):
         data = load_settings(self.settings_path)
