@@ -67,15 +67,16 @@ class CommandEditor(tk.Toplevel):
         self.callback = callback
 
         self.title(f"Edit Command: {cmd_name}")
-        self.geometry("800x700")
+        self.geometry("900x800")
         self.resizable(True, True)
         self.grab_set()
 
+        # === Header ===
         ttk.Label(self, text=f"Command Key (cannot be changed):", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=20, pady=(20,5))
         ttk.Entry(self, text=cmd_name, state="readonly").pack(fill="x", padx=20, pady=(0,15))
 
         # Title
-        ttk.Label(self, text="Title:").pack(anchor="w", padx=20, pady=(5,2))
+        ttk.Label(self, text="Title:").pack(anchor="w", padx=20, pady=(10,2))
         self.title_var = tk.StringVar(value=cfg.get("title", ""))
         ttk.Entry(self, textvariable=self.title_var, width=80).pack(fill="x", padx=20, pady=(0,10))
 
@@ -89,41 +90,169 @@ class CommandEditor(tk.Toplevel):
         self.regex_var = tk.BooleanVar(value=bool(cfg.get("isRegex")))
         ttk.Checkbutton(self, text="Use Regular Expressions (isRegex)", variable=self.regex_var).pack(anchor="w", padx=20, pady=5)
 
-        # Find patterns
-        ttk.Label(self, text="Find Patterns (one per line):").pack(anchor="w", padx=20, pady=(15,2))
-        self.find_text = scrolledtext.ScrolledText(self, height=6)
-        self.find_text.insert("1.0", "\n".join(cfg.get("find", [])))
-        self.find_text.pack(fill="both", expand=True, padx=20, pady=(0,10))
+        # === Paired Find/Replace Table ===
+        ttk.Label(self, text="Find → Replace Patterns:", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=20, pady=(15,5))
 
-        # Replace patterns
-        ttk.Label(self, text="Replace With (one per line, same count as Find):").pack(anchor="w", padx=20, pady=(10,2))
-        self.replace_text = scrolledtext.ScrolledText(self, height=6)
-        self.replace_text.insert("1.0", "\n".join(cfg.get("replace", [])))
-        self.replace_text.pack(fill="both", expand=True, padx=20, pady=(0,15))
+        table_frame = ttk.Frame(self)
+        table_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
-        # Buttons
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="Save", command=self.save).pack(side="left", padx=10)
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side="left", padx=10)
+        # Treeview with two columns
+        columns = ("find", "replace")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
+        self.tree.heading("find", text="Find Pattern")
+        self.tree.heading("replace", text="Replace With")
+        self.tree.column("find", width=400, anchor="w")
+        self.tree.column("replace", width=400, anchor="w")
+
+        vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        # Load existing pairs
+        self.load_pairs()
+
+        # Buttons below table
+        btns = ttk.Frame(self)
+        btns.pack(pady=8)
+        ttk.Button(btns, text="Add Row", command=self.add_row).pack(side="left", padx=5)
+        ttk.Button(btns, text="Edit Selected", command=self.edit_selected).pack(side="left", padx=5)
+        ttk.Button(btns, text="Delete Selected", command=self.delete_selected).pack(side="left", padx=5)
+        ttk.Button(btns, text="Move Up", command=self.move_up).pack(side="left", padx=5)
+        ttk.Button(btns, text="Move Down", command=self.move_down).pack(side="left", padx=5)
+
+        # Save/Cancel
+        save_btn_frame = ttk.Frame(self)
+        save_btn_frame.pack(pady=20)
+        ttk.Button(save_btn_frame, text="Save", command=self.save).pack(side="left", padx=10)
+        ttk.Button(save_btn_frame, text="Cancel", command=self.destroy).pack(side="left", padx=10)
+
+        # Double-click to edit
+        self.tree.bind("<Double-1>", lambda e: self.edit_selected())
+
+    def load_pairs(self):
+        finds = self.cfg.get("find", [])
+        replaces = self.cfg.get("replace", [])
+        max_len = max(len(finds), len(replaces))
+        for i in range(max_len):
+            f = finds[i] if i < len(finds) else ""
+            r = replaces[i] if i < len(replaces) else ""
+            self.tree.insert("", "end", values=(f, r))
+
+    def get_pairs(self):
+        pairs = []
+        for item in self.tree.get_children():
+            values = self.tree.item(item, "values")
+            find_val = values[0].strip()
+            replace_val = values[1].strip()
+            if find_val:  # only include if find is non-empty
+                pairs.append((find_val, replace_val))
+        return pairs
+
+    def add_row(self):
+        self.edit_row("", "")
+
+    def edit_selected(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("No selection", "Please select a row to edit.")
+            return
+        item = selected[0]
+        values = self.tree.item(item, "values")
+        self.edit_row(values[0], values[1], item)
+
+    def edit_row(self, find_text="", replace_text="", item=None):
+        dialog = PairEditDialog(self, find_text, replace_text)
+        self.wait_window(dialog)
+        if dialog.result:
+            find_val, replace_val = dialog.result
+            if item:
+                self.tree.item(item, values=(find_val, replace_val))
+            else:
+                self.tree.insert("", "end", values=(find_val, replace_val))
+
+    def delete_selected(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("No selection", "Please select a row to delete.")
+            return
+        if messagebox.askyesno("Delete", "Delete selected row(s)?"):
+            for item in selected:
+                self.tree.delete(item)
+
+    def move_up(self):
+        selected = self.tree.selection()
+        if not selected: return
+        for item in selected:
+            idx = self.tree.index(item)
+            if idx == 0: continue
+            prev = self.tree.get_children()[idx - 1]
+            self.tree.move(item, "", idx - 1)
+            self.tree.move(prev, "", idx)
+
+    def move_down(self):
+        selected = self.tree.selection()
+        if not selected: return
+        items = list(self.tree.get_children())
+        for item in reversed(selected):  # reverse to handle multiple
+            idx = self.tree.index(item)
+            if idx >= len(items) - 1: continue
+            next_item = items[idx + 1]
+            self.tree.move(item, "", idx + 1)
 
     def save(self):
-        find_lines = [line.strip() for line in self.find_text.get("1.0", "end-1c").splitlines() if line.strip()]
-        replace_lines = [line.strip() for line in self.replace_text.get("1.0", "end-1c").splitlines() if line.strip()]
+        pairs = self.get_pairs()
+        if not pairs:
+            if not messagebox.askyesno("No patterns", "You have no find/replace pairs. Save anyway?"):
+                return
 
-        if len(find_lines) != len(replace_lines) and replace_lines:
-            messagebox.showerror("Error", "Number of 'find' and 'replace' lines must match (or replace can be empty).")
-            return
+        find_list = [p[0] for p in pairs]
+        replace_list = [p[1] for p in pairs]
 
         self.cfg.update({
             "title": self.title_var.get().strip() or "(no title)",
             "description": self.desc_text.get("1.0", "end-1c").strip(),
             "isRegex": self.regex_var.get(),
-            "find": find_lines,
-            "replace": replace_lines if replace_lines else []
+            "find": find_list,
+            "replace": replace_list
         })
 
         self.callback(self.cmd_name, self.cfg)
+        self.destroy()
+
+
+# === Simple dialog for editing a single find/replace pair ===
+class PairEditDialog(tk.Toplevel):
+    def __init__(self, parent, find_text="", replace_text=""):
+        super().__init__(parent)
+        self.title("Edit Find → Replace")
+        self.geometry("700x200")
+        self.resizable(True, False)
+        self.grab_set()
+
+        ttk.Label(self, text="Find Pattern:", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=20, pady=(20,5))
+        self.find_var = tk.StringVar(value=find_text)
+        ttk.Entry(self, textvariable=self.find_var, width=80).pack(fill="x", padx=20, pady=(0,10))
+
+        ttk.Label(self, text="Replace With:", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=20, pady=(5,5))
+        self.replace_var = tk.StringVar(value=replace_text)
+        ttk.Entry(self, textvariable=self.replace_var, width=80).pack(fill="x", padx=20, pady=(0,20))
+
+        btns = ttk.Frame(self)
+        btns.pack()
+        ttk.Button(btns, text="OK", command=self.ok).pack(side="left", padx=10)
+        ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="left", padx=10)
+
+        self.result = None
+
+    def ok(self):
+        self.result = (self.find_var.get(), self.replace_var.get())
+        self.destroy()
+
+    def cancel(self):
         self.destroy()
 
 # ===================================================================
