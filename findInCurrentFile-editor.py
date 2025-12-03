@@ -143,12 +143,12 @@ class CommandEditor(tk.Toplevel):
 
         # Buttons below table
         btns = ttk.Frame(self)
-        btns.pack(pady=8)
-        ttk.Button(btns, text="Add Row", command=self.add_row).pack(side="left", padx=5)
-        ttk.Button(btns, text="Edit Selected", command=self.edit_selected).pack(side="left", padx=5)
-        ttk.Button(btns, text="Delete Selected", command=self.delete_selected).pack(side="left", padx=5)
-        ttk.Button(btns, text="Move Up", command=self.move_up).pack(side="left", padx=5)
-        ttk.Button(btns, text="Move Down", command=self.move_down).pack(side="left", padx=5)
+        btns.pack(pady=12, padx=20, fill="x")
+        ttk.Button(btns, text="  Add Row  ", command=self.add_row).pack(side="left", padx=8)
+        ttk.Button(btns, text="  Edit Selected  ", command=self.edit_selected).pack(side="left", padx=8)
+        ttk.Button(btns, text="  Delete Selected  ", command=self.delete_selected).pack(side="left", padx=8)
+        ttk.Button(btns, text="  Move Up  ", command=self.move_up).pack(side="left", padx=8)
+        ttk.Button(btns, text="  Move Down  ", command=self.move_down).pack(side="left", padx=8)
 
         # Save/Cancel
         save_btn_frame = ttk.Frame(self)
@@ -158,6 +158,14 @@ class CommandEditor(tk.Toplevel):
 
         # Double-click to edit
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
+
+        # Center window on screen
+        self.update_idletasks()
+        w = 980
+        h = 840
+        x = (self.winfo_screenwidth() // 2) - (w // 2)
+        y = (self.winfo_screenheight() // 2) - (h // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def load_pairs(self):
         self.tree.delete(*self.tree.get_children())
@@ -170,7 +178,7 @@ class CommandEditor(tk.Toplevel):
             tag = "even" if i % 2 == 0 else "odd"
             self.tree.insert("", "end", values=(f, r), tags=(tag,))
 
-        self.after(100, self.auto_fit_columns)
+        self.after(200, self.auto_fit_columns)
 
     def auto_fit_columns(self):
         font_normal = tkfont.Font(family="Segoe UI", size=10)
